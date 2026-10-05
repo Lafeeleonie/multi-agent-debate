@@ -77,6 +77,7 @@ def export_markdown(engine: DebateEngine) -> str:
                     f"Communes : {event.constraints or 'Aucune.'}",
                     f"A : {event.constraints_a or 'Aucune.'}",
                     f"B : {event.constraints_b or 'Aucune.'}",
+                    f"Recherche web : {event.web_enabled} · A : {event.web_a} · B : {event.web_b}",
                     "",
                 ]
             )
@@ -93,6 +94,24 @@ def export_markdown(engine: DebateEngine) -> str:
                 "",
             ]
         )
+        if message.research:
+            lines.extend(["#### Recherches web", ""])
+            for query in message.research.queries:
+                lines.extend([f"Requête : {query}", ""])
+            for error in message.research.errors:
+                lines.extend([f"> {error}", ""])
+            for source in message.research.sources:
+                title = source.title.replace("[", "\\[").replace("]", "\\]")
+                lines.extend(
+                    [
+                        f"[{source.source_id} — {title}](<{source.url}>)",
+                        "",
+                        source.snippet,
+                        "",
+                        f"_Extrait obtenu le {source.retrieved_at}_",
+                        "",
+                    ]
+                )
     if engine.state.judge_result:
         lines.extend(["## Rapport du juge", "", engine.state.judge_result.content, ""])
         if engine.state.judge_context_reduced:

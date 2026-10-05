@@ -7,17 +7,18 @@ import streamlit as st
 
 from debate.engine import DebateEngine
 from debate.export import export_json, export_markdown
-from debate.models import AgentConfig, DebateConfig, JudgeConfig
+from debate.models import AgentConfig, DebateConfig, JudgeConfig, WebSearchConfig
 from debate.ollama_client import OllamaClient, OllamaError
 from debate.presets import PRESET_NAMES, get_preset
 from debate.runner import DebateRunner
+from debate.web_search import BACKENDS
 
 st.set_page_config(page_title="Agora locale · Débat IA", page_icon="💬", layout="wide")
 
 
 def seed_widgets(config: DebateConfig, *, replace: bool = False) -> None:
     values = asdict(config)
-    for group in ("agent_a", "agent_b", "judge"):
+    for group in ("agent_a", "agent_b", "judge", "web"):
         nested = values.pop(group)
         values.update({f"{group}_{key}": value for key, value in nested.items()})
     for key, value in values.items():
@@ -32,6 +33,8 @@ def apply_preset() -> None:
     preset.ollama_url = st.session_state.cfg_ollama_url
     preset.model = st.session_state.cfg_model
     preset.judge.model = st.session_state.cfg_judge_model
+    for key in asdict(preset.web):
+        setattr(preset.web, key, st.session_state["cfg_web_" + key])
     seed_widgets(preset, replace=True)
 
 
@@ -71,6 +74,11 @@ def agent_fields(prefix: str, *, disabled: bool) -> AgentConfig:
             help="Visible uniquement par cet agent dans les appels au modèle. "
             "Cette configuration initiale figure dans l'export JSON.",
         ),
+        web_access=st.checkbox(
+            "Autoriser les recherches web de cet agent",
+            key=f"cfg_{prefix}_web_access",
+            disabled=disabled,
+        ),
     )
 
 
@@ -78,7 +86,7 @@ def configuration() -> DebateConfig:
     locked = st.session_state.get("runner") is not None
     with st.sidebar:
         st.title("💬 Agora locale")
-        st.caption("Deux agents, votre voix, aucun service cloud.")
+        st.caption("Deux agents locaux, votre voix, un accès web optionnel.")
         st.selectbox("Preset", PRESET_NAMES, key="preset", disabled=locked)
         st.button("Remplir les champs", on_click=apply_preset, disabled=locked, width="stretch")
         if locked:
@@ -114,6 +122,46 @@ def configuration() -> DebateConfig:
             agent_a = agent_fields("agent_a", disabled=locked)
         with st.expander("Agent B"):
             agent_b = agent_fields("agent_b", disabled=locked)
+        with st.expander("Recherche web", expanded=True):
+            web_enabled = st.checkbox(
+                "Activer la recherche web",
+                key="cfg_web_enabled",
+                disabled=locked,
+            )
+            backend_values = list(BACKENDS.values())
+            web_backend = st.selectbox(
+                "Moteur de recherche",
+                backend_values,
+                key="cfg_web_backend",
+                format_func=lambda value: next(k for k, v in BACKENDS.items() if v == value),
+                disabled=locked,
+            )
+            web_queries = st.number_input(
+                "Requêtes maximum par intervention",
+                1,
+                3,
+                key="cfg_web_max_queries",
+                disabled=locked,
+            )
+            web_results = st.number_input(
+                "Résultats maximum par requête",
+                1,
+                5,
+                key="cfg_web_max_results",
+                disabled=locked,
+            )
+            web_timeout = st.number_input(
+                "Délai web par moteur (secondes)",
+                3,
+                30,
+                key="cfg_web_timeout_seconds",
+                disabled=locked,
+            )
+            st.caption(
+                "Sans clé API. Les agents choisissent leurs requêtes ; seuls les termes "
+                "recherchés sont envoyés aux moteurs. Les résultats fournissent des "
+                "liens et extraits, pas une lecture intégrale des pages."
+            )
         with st.expander("Tours et performances"):
             rounds = st.number_input(
                 "Tours maximum (un tour = A puis B)",
@@ -223,6 +271,9 @@ def configuration() -> DebateConfig:
         agent_a=agent_a,
         agent_b=agent_b,
         judge=JudgeConfig(judge_enabled, judge_model, judge_prompt, judge_temperature),
+        web=WebSearchConfig(
+            web_enabled, int(web_queries), int(web_results), int(web_timeout), web_backend
+        ),
     )
 
 
@@ -241,6 +292,14 @@ def live_controls(runner: DebateRunner) -> None:
             compression = st.checkbox(
                 "Activer la compression si nécessaire", value=config.compression
             )
+            web_enabled = st.checkbox(
+                "Recherche web pour les prochaines réponses", value=config.web.enabled
+            )
+            col_web_a, col_web_b = st.columns(2)
+            with col_web_a:
+                web_a = st.checkbox("Accès web de A", value=config.agent_a.web_access)
+            with col_web_b:
+                web_b = st.checkbox("Accès web de B", value=config.agent_b.web_access)
             apply = st.form_submit_button("Appliquer les consignes", disabled=disabled)
         if apply:
             try:
@@ -250,6 +309,9 @@ def live_controls(runner: DebateRunner) -> None:
                     constraints_a,
                     constraints_b,
                     compression,
+                    web_enabled=web_enabled,
+                    web_a=web_a,
+                    web_b=web_b,
                 )
                 runner.error = None
                 st.success("Consignes appliquées aux prochaines réponses et au juge.")
@@ -269,6 +331,20 @@ def show_history(engine: DebateEngine) -> None:
         ):
             st.caption(f"Tour {message.round_number} · {message.speaker_name}")
             st.markdown(message.content)
+            if message.research:
+                with st.expander(
+                    f"Recherches web · {message.speaker_name} · tour {message.round_number}"
+                ):
+                    if message.research.queries:
+                        st.write("Requêtes : " + " ; ".join(message.research.queries))
+                    elif not message.research.errors:
+                        st.caption("Aucune recherche nécessaire selon l'agent.")
+                    for error in message.research.errors:
+                        st.warning(error)
+                    for source in message.research.sources:
+                        st.link_button(f"[{source.source_id}] {source.title}", source.url)
+                        st.write(source.snippet)
+                        st.caption(f"Extrait de recherche obtenu le {source.retrieved_at}")
             if message.speaker_id != "human":
                 st.caption(f"{message.duration_seconds:.1f} s · {message.tokens or '—'} tokens")
     if engine.state.judge_result:
@@ -346,7 +422,10 @@ def debate_panel(config: DebateConfig) -> None:
                 else engine.config.agent_b.name
             )
         )
-        st.info(f"{name} prépare sa réponse… La pause ou l'arrêt prend effet après cet appel.")
+        st.info(
+            f"{name} prépare sa réponse et ses recherches éventuelles… "
+            "La pause ou l'arrêt prend effet après cette intervention."
+        )
     elif engine.finished:
         st.success(engine.state.stop_reason)
     elif runner.running:

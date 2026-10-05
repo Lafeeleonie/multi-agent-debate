@@ -5,9 +5,16 @@ import json
 from time import monotonic
 
 from debate.agents import TURN_SCHEMA, system_prompt
-from debate.memory import PRIVATE_MEMORY_BUDGET, SummaryMemory, clip_text, prepare_context
+from debate.memory import (
+    PRIVATE_MEMORY_BUDGET,
+    SummaryMemory,
+    clip_text,
+    messages_cost,
+    prepare_context,
+)
 from debate.models import ControlEvent, DebateConfig, DebateMessage, DebateState, utc_now
 from debate.ollama_client import OllamaClient, OllamaError
+from debate.web_search import WebSearchClient, bound_research, research_turn
 
 
 class DebateEngine:
@@ -70,6 +77,9 @@ class DebateEngine:
         constraints_a: str,
         constraints_b: str,
         compression: bool | None = None,
+        web_enabled: bool | None = None,
+        web_a: bool | None = None,
+        web_b: bool | None = None,
     ) -> None:
         if not language.strip():
             raise ValueError("La langue est obligatoire.")
@@ -79,6 +89,12 @@ class DebateEngine:
         self.config.agent_b.constraints = constraints_b
         if compression is not None:
             self.config.compression = compression
+        if web_enabled is not None:
+            self.config.web.enabled = web_enabled
+        if web_a is not None:
+            self.config.agent_a.web_access = web_a
+        if web_b is not None:
+            self.config.agent_b.web_access = web_b
         self.state.control_events.append(
             ControlEvent(
                 self.config.language,
@@ -86,12 +102,17 @@ class DebateEngine:
                 constraints_a,
                 constraints_b,
                 len(self.state.messages),
+                web_enabled=self.config.web.enabled,
+                web_a=self.config.agent_a.web_access,
+                web_b=self.config.agent_b.web_access,
             )
         )
         self._reset_consensus()
         self.state.judge_result = None
 
-    def step(self, client: OllamaClient) -> DebateMessage:
+    def step(
+        self, client: OllamaClient, web_client: WebSearchClient | None = None
+    ) -> DebateMessage:
         if self.finished:
             raise ValueError("Le débat est terminé.")
         speaker = self.next_speaker
@@ -103,6 +124,31 @@ class DebateEngine:
             "S'il n'y a pas encore de message, présente ta position initiale."
         )
         started = monotonic()
+        research = None
+        if self.config.web.enabled and agent.web_access:
+            research = research_turn(
+                self.config,
+                agent,
+                self.state.messages,
+                speaker,
+                self.next_round,
+                client,
+                web_client if web_client is not None else WebSearchClient(),
+            )
+            fixed_cost = messages_cost(
+                [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": instruction},
+                ]
+            )
+            evidence_budget = min(
+                6000,
+                self.config.context_tokens // 4,
+                max(0, self.config.context_tokens - self.config.max_tokens - 512 - fixed_cost),
+            )
+            evidence = bound_research(research, evidence_budget)
+            if evidence:
+                instruction += "\n\n" + evidence
         context = prepare_context(
             prompt,
             instruction,
@@ -132,6 +178,7 @@ class DebateEngine:
             duration_seconds=monotonic() - started,
             tokens=result.tokens,
             continue_debate=vote,
+            research=research,
         )
         # Commit only a valid complete response; failed calls leave the turn unconsumed.
         self.state.messages.append(message)

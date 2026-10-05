@@ -6,6 +6,7 @@ from streamlit.testing.v1 import AppTest
 from debate.models import DEFAULT_MODEL
 from debate.ollama_client import OllamaError
 from tests.conftest import FakeClient, turn
+from tests.test_web_search import FakeSearch
 
 APP_PATH = Path(__file__).resolve().parents[1] / "app.py"
 
@@ -74,3 +75,22 @@ def test_human_participation_and_live_constraints_in_ui(monkeypatch):
     prompt = client.calls[-1]["messages"][0]["content"]
     assert "English" in prompt and "At most 100 words" in prompt
     assert any("Voici mon avis humain." in m["content"] for m in client.calls[-1]["messages"])
+
+
+def test_interface_web_controls_and_source_display(monkeypatch):
+    mock_models(monkeypatch)
+    client = FakeClient(['{"queries":["preuve"]}', turn("Argument sourcé [A1-1]")])
+    monkeypatch.setattr("debate.runner.OllamaClient", lambda url: client)
+    search = FakeSearch()
+    monkeypatch.setattr("debate.engine.WebSearchClient", lambda: search)
+    app = AppTest.from_file(APP_PATH, default_timeout=10).run()
+    app.checkbox(key="cfg_web_enabled").check().run()
+    button(app, "Lancer").click().run()
+    wait_for_reply(app)
+    assert not app.exception
+    assert search.queries == ["preuve"]
+    assert any("Requêtes : preuve" in text.value for text in app.markdown)
+    assert app.session_state.runner.engine.state.messages[0].research.sources
+    next(w for w in app.checkbox if w.label == "Accès web de B").uncheck()
+    button(app, "Appliquer les consignes").click().run()
+    assert not app.session_state.runner.engine.config.agent_b.web_access

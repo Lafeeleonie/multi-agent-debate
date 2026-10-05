@@ -31,6 +31,24 @@ class AgentConfig:
     constraints: str = ""
     temperature: float = 0.7
     private_memory: str = ""
+    web_access: bool = True
+
+
+@dataclass
+class WebSearchConfig:
+    enabled: bool = False
+    max_queries: int = 1
+    max_results: int = 3
+    timeout_seconds: int = 10
+    backend: str = "duckduckgo,bing,brave"
+
+    def validate(self) -> None:
+        if not 1 <= self.max_queries <= 3 or not 1 <= self.max_results <= 5:
+            raise ValueError("Limitez la recherche à 1–3 requêtes et 1–5 résultats par requête.")
+        if not 3 <= self.timeout_seconds <= 30:
+            raise ValueError("Le délai de recherche doit être compris entre 3 et 30 secondes.")
+        if self.backend not in {"duckduckgo,bing,brave", "duckduckgo", "bing", "brave"}:
+            raise ValueError("Moteur de recherche non pris en charge.")
 
 
 @dataclass
@@ -77,6 +95,7 @@ class DebateConfig:
         )
     )
     judge: JudgeConfig = field(default_factory=JudgeConfig)
+    web: WebSearchConfig = field(default_factory=WebSearchConfig)
 
     def validate(self) -> None:
         if not self.topic.strip() or not self.language.strip() or not self.model.strip():
@@ -104,6 +123,25 @@ class DebateConfig:
             raise ValueError("La température du juge doit être comprise entre 0 et 2.")
         if self.judge.enabled and not self.judge.model.strip():
             raise ValueError("Le modèle du juge est obligatoire.")
+        self.web.validate()
+
+
+@dataclass
+class WebSource:
+    source_id: str
+    title: str
+    url: str
+    snippet: str
+    query: str
+    retrieved_at: str = field(default_factory=utc_now)
+
+
+@dataclass
+class WebResearch:
+    queries: list[str] = field(default_factory=list)
+    sources: list[WebSource] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    timestamp: str = field(default_factory=utc_now)
 
 
 @dataclass
@@ -116,6 +154,7 @@ class DebateMessage:
     duration_seconds: float = 0.0
     tokens: int | None = None
     continue_debate: bool | None = None
+    research: WebResearch | None = None
 
 
 @dataclass
@@ -126,6 +165,9 @@ class ControlEvent:
     constraints_b: str
     after_message: int
     timestamp: str = field(default_factory=utc_now)
+    web_enabled: bool = False
+    web_a: bool = True
+    web_b: bool = True
 
 
 @dataclass

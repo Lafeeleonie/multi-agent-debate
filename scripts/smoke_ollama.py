@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from debate.engine import DebateEngine  # noqa: E402
 from debate.judge import run_judge  # noqa: E402
-from debate.models import DEFAULT_MODEL, DebateConfig  # noqa: E402
+from debate.models import DEFAULT_MODEL, DebateConfig, WebSearchConfig  # noqa: E402
 from debate.ollama_client import OllamaClient  # noqa: E402
 
 
@@ -18,6 +18,9 @@ def main() -> None:
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--url", default="http://localhost:11434")
     parser.add_argument("--context", type=int, default=8192)
+    parser.add_argument(
+        "--web", action="store_true", help="Vérifier aussi des recherches web réelles"
+    )
     args = parser.parse_args()
     client = OllamaClient(args.url)
     client.require_model(args.model)
@@ -29,11 +32,21 @@ def main() -> None:
         max_tokens=512,
         context_tokens=args.context,
         constraints="Réponds en deux phrases maximum.",
+        web=WebSearchConfig(enabled=args.web),
     )
+    if args.web:
+        config.agent_a.system_prompt = (
+            "Pour ce test, effectue au moins une recherche web avant de répondre : cherche "
+            "une source officielle sur les émissions des transports en commun. Cite le lien fourni."
+        )
     config.judge.model = args.model
     engine = DebateEngine(config)
     first = engine.step(client)
     print(f"A ({first.duration_seconds:.1f}s, {first.tokens} tokens) : {first.content}")
+    if first.research:
+        print("Requêtes A :", first.research.queries)
+        print("Sources A :", [s.url for s in first.research.sources])
+        print("Erreurs web A :", first.research.errors)
     engine.add_human_message("Il faut également penser aux personnes vivant à la campagne.")
     engine.update_controls(
         "English", "At most two sentences. Address the human's rural concern.", "", ""
@@ -44,6 +57,10 @@ def main() -> None:
     print(f"Judge ({report.duration_seconds:.1f}s, {report.tokens} tokens) : {report.content}")
     assert engine.agent_turns == 2 and engine.finished
     assert [m.speaker_id for m in engine.state.messages] == ["a", "human", "b"]
+    if args.web:
+        assert any(m.research and m.research.sources for m in engine.state.messages), (
+            "Aucune source obtenue pendant le test réel de recherche."
+        )
     print("OK : deux contextes, avis humain, changement de langue, sortie structurée et juge.")
 
 

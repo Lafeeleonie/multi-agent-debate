@@ -1,4 +1,5 @@
 streamlit>=1.58,<2
 requests>=2.32,<3
+ddgs>=9.16,<10
 pytest>=8,<10
 ruff>=0.15,<1

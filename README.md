@@ -1,7 +1,7 @@
 # Multi-agent Debate · Agora locale
 
-Application **locale** de débat avec deux agents IA Ollama, votre participation et un juge
-optionnel. Interface Streamlit en français, langue des réponses librement configurable.
+Application de débat avec deux agents IA **locaux** Ollama, votre participation, un juge
+optionnel et la recherche web. Interface Streamlit en français, langue des réponses configurable.
 Pas de clé API, de base de données ou de service cloud nécessaire. Licence MIT pour le code ;
 les poids des modèles ne sont pas inclus et conservent leurs propres licences.
 
@@ -21,9 +21,10 @@ Prérequis : **Python 3.12+** ([installation](https://www.python.org/downloads/)
    au premier lancement ou lorsqu'elles changent et ouvre `http://localhost:8501`.
    Gardez la fenêtre ouverte ; `Ctrl+C` arrête le serveur.
 
-L'installation initiale des dépendances Python nécessite Internet. Ensuite, le débat se déroule
-sur votre machine. Le lanceur **ne télécharge jamais de modèle** et ne démarre pas une seconde
-instance d'Ollama. L'application utilise uniquement une adresse de boucle locale
+L'installation initiale des dépendances Python nécessite Internet. La génération du débat se déroule
+sur votre machine ; la recherche web optionnelle nécessite Internet et envoie les requêtes choisies
+aux moteurs de recherche. Le lanceur **ne télécharge jamais de modèle** et ne démarre pas une seconde
+instance d'Ollama. La connexion aux modèles utilise uniquement une adresse de boucle locale
 (`localhost`, `127.0.0.1`, `[::1]`) et écarte les modèles cloud, y compris les alias indiquant
 un serveur distant dans `/api/show`.
 
@@ -96,6 +97,41 @@ avant de l'inscrire dans l'historique. Pendant les générations, l'interface re
 Les consignes sont transmises dans les prompts système. Leur respect sémantique dépend du modèle :
 une limite de mots en langage naturel n'est pas un validateur strict. La limite de tokens est,
 elle, transmise comme limite de génération à Ollama.
+
+## Recherche web des agents
+
+Ouvrez **Recherche web** dans la barre latérale et cochez **Activer la recherche web**.
+Chaque agent dispose aussi d'une autorisation individuelle dans sa configuration.
+Vous pouvez activer ou désactiver le web pour les prochaines réponses, et pour A/B séparément,
+dans le panneau de modification des consignes pendant une pause.
+
+L'accès web est désactivé par défaut. Lorsqu'il est autorisé, l'agent prépare localement une
+liste de requêtes JSON avant son intervention. Il peut décider qu'aucune recherche n'est nécessaire
+ou réutiliser les sources déjà obtenues. L'application exécute ses requêtes via
+[DDGS](https://github.com/deedy5/ddgs), sans clé API ni modèle cloud. Choix de moteur : DuckDuckGo,
+Bing, Brave ou sélection automatique parmi ces trois moteurs. Le mode automatique peut consulter
+plusieurs moteurs pour la même requête. La mémoire privée n'est pas fournie au planificateur.
+L'application transmet les requêtes aux moteurs, pas les prompts Ollama ou tout l'historique.
+Comme les requêtes sont générées par le modèle à partir du contexte public, elles peuvent contenir
+des termes issus de ce que vous avez écrit ; gardez le web désactivé pour des discussions sensibles.
+
+Valeurs initiales : **une requête par intervention**, **trois résultats par requête** et un délai
+de dix secondes par moteur. Limites configurables : trois requêtes et cinq résultats par requête.
+Les résultats sont dédoublonnés et bornés pour respecter le budget de contexte.
+L'agent reçoit les titres, liens, extraits et dates de récupération, puis rédige sa réponse.
+Le panneau **Recherches web** sous chaque réponse affiche les requêtes, liens et éventuelles erreurs.
+Les identifiants de source (par exemple `A1-1`) permettent de retrouver les extraits utilisés.
+L'adversaire et le juge reçoivent aussi ces informations dans l'historique public, avec le rôle
+`user`, sans les attribuer à leurs propres réponses. Les exports Markdown/JSON conservent ces sources.
+
+Cette version utilise **les extraits renvoyés par les moteurs** : elle n'ouvre pas automatiquement
+les pages ni les PDF complets. La date de récupération n'est pas une date de publication.
+Les extraits sont traités comme des données externes, avec une consigne explicite d'ignorer leurs
+éventuelles instructions. La réponse demande de citer les liens ; vérifiez les références dans le
+panneau de sources, car le modèle peut omettre une citation ou interpréter un extrait incorrectement.
+Si le web est inaccessible, limité ou le plan JSON invalide, une erreur est visible et l'agent
+peut poursuivre le débat sans prétendre avoir vérifié les faits en ligne.
+Un moteur sans clé peut changer son fonctionnement ou imposer des limites ; essayez un autre moteur.
 
 ## Agents, mémoire et arrêt anticipé
 
@@ -182,6 +218,7 @@ debate/
   models.py             Dataclasses de configuration et historique
   agents.py             Prompts et attribution correcte des rôles
   ollama_client.py       API HTTP locale, erreurs et contrôle des modèles
+  web_search.py          Requêtes choisies par les agents, recherche web et extraits bornés
   memory.py             Budget de contexte, mémoire et résumés progressifs
   engine.py             Alternance A/B, avis humains, consignes et consensus
   runner.py             Un appel en arrière-plan, pause et reprise
@@ -219,7 +256,7 @@ Dans l'environnement virtuel :
 
 Les tests ordinaires simulent Ollama et ne requièrent ni GPU ni réseau. Ils vérifient notamment
 l'attribution des rôles, l'isolation des mémoires, les avis humains, les consignes, le consensus,
-les erreurs, les limites de contexte, les exports, les pauses et le parcours Streamlit.
+les erreurs, les limites de contexte, les exports, les pauses, la recherche web et le parcours Streamlit.
 
 Pour un test réel volontaire, avec le modèle déjà installé (trois générations courtes) :
 
@@ -232,14 +269,26 @@ Il vérifie A, un avis humain, B après un changement de langue, puis le juge. O
 `--model NOM`, `--url URL_LOCALE`, `--context 16384`. Il n'évalue pas automatiquement la qualité
 du débat ni le respect sémantique de la langue : lisez les réponses affichées.
 
+Pour vérifier aussi une recherche Internet réelle, ajoutez `--web` :
+
+```powershell
+.\.venv\Scripts\python.exe scripts/smoke_ollama.py --web
+```
+
+Le test échoue si aucune source n'a pu être récupérée. Il ne vérifie pas automatiquement la fidélité
+de l'argument aux sources. La durée affichée inclut la planification et la recherche éventuelles ;
+le compteur de tokens d'une intervention reste celui de sa réponse finale.
+
 ## Limites et suite possible
 
 - Pas de streaming dans cette première version ; les interventions validées apparaissent une à une.
-- Une pause ou un arrêt n'annule pas un appel HTTP déjà envoyé ; délai maximal de génération : 600 s.
+- Une pause ou un arrêt prend effet après l'intervention en cours, qui peut inclure la planification
+  web, plusieurs recherches et la réponse. Délai maximal par génération Ollama : 600 s.
 - Les sessions sont en RAM. Un redémarrage ou une nouvelle session navigateur perd l'état : exportez
   avant de fermer. Pas d'import ou de reprise depuis un JSON dans cette version.
 - Les modèles peuvent halluciner, manquer une objection ou négliger une contrainte. Le juge ne
-  constitue pas une preuve de vérité. Les sorties structurées doivent être prises en charge par le modèle.
+  constitue pas une preuve de vérité. Le plan de recherche web utilise du JSON structuré, même si
+  l'arrêt anticipé est désactivé ; un modèle incompatible poursuit sans recherche et signale l'erreur.
 - Résumés susceptibles de perdre des détails et estimation de contexte volontairement prudente.
 - Le nombre de tours et les modèles restent fixes pendant un débat ; langue et contraintes sont modifiables.
 - Pistes futures : streaming validé, sauvegarde/reprise, sources distinctes, RAG et tokenizer adapté.
