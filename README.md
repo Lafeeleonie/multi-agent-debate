@@ -1,7 +1,8 @@
 # Multi-agent Debate · Agora locale
 
 Application de débat avec deux agents IA **locaux** Ollama, votre participation, un juge
-optionnel et la recherche web. Interface Streamlit en français, langue des réponses configurable.
+optionnel, la recherche web et un historique sauvegardé automatiquement. Interface Streamlit
+en français, langue des réponses configurable.
 Pas de clé API, de base de données ou de service cloud nécessaire. Licence MIT pour le code ;
 les poids des modèles ne sont pas inclus et conservent leurs propres licences.
 
@@ -86,8 +87,8 @@ Le rapport du juge et les exports apparaissent à la suite.
 7. Pendant une pause, ouvrez **Modifier la langue et les contraintes en pause** et appliquez vos
    nouvelles consignes. Elles valent pour les prochaines réponses et le juge, sans réécrire les
    anciennes interventions. Le changement est enregistré dans les exports.
-8. **Arrêter** termine le débat après l'appel en cours. **Réinitialiser** efface la session courante,
-   une fois l'appel terminé ; exportez d'abord si vous souhaitez la conserver.
+8. **Arrêter** termine le débat après l'appel en cours. **Réinitialiser** libère la session courante,
+   une fois l'appel terminé ; la conversation reste dans l'historique local.
 
 Un **tour complet = une intervention de A puis de B** : 10 tours permettent donc 20 réponses
 d'agents, auxquelles s'ajoutent vos interventions. L'application affiche les réponses complètes
@@ -97,6 +98,46 @@ avant de l'inscrire dans l'historique. Pendant les générations, l'interface re
 Les consignes sont transmises dans les prompts système. Leur respect sémantique dépend du modèle :
 une limite de mots en langage naturel n'est pas un validateur strict. La limite de tokens est,
 elle, transmise comme limite de génération à Ollama.
+
+## Historique, restauration et sauvegardes
+
+Les débats sont **sauvegardés automatiquement** dans `conversations/`, sous forme de fichiers JSON
+identifiés indépendamment du sujet. Une sauvegarde est écrite au lancement, après chaque réponse
+terminée (même si le navigateur a été fermé), après votre intervention, un changement de consignes,
+l'arrêt et le rapport du juge. L'écriture remplace le fichier de façon atomique : une écriture
+interrompue laisse la sauvegarde précédente intacte. Ce dossier est ignoré par Git.
+
+Dans la barre latérale, ouvrez **Historique et restauration** :
+
+1. Choisissez une conversation par son sujet, son nombre de messages, son état et sa date de modification.
+2. Cliquez sur **Restaurer la conversation**. Tous les messages, sources, consignes, mémoires privées,
+   résumé, votes de consensus et éventuel rapport du juge sont restaurés.
+3. Le débat revient **en pause**, sans génération automatique. Cliquez sur **Réponse suivante / reprendre**
+   pour continuer avec le bon agent. La restauration est disponible lorsque la génération et le mode
+   automatique sont en pause.
+4. Pour continuer un débat terminé, ouvrez **Prolonger ce débat**, choisissez les tours supplémentaires,
+   puis **Rouvrir le débat en pause**. L'historique et les mémoires sont conservés, le consensus repart
+   de zéro et l'ancien rapport du juge est retiré pour permettre une nouvelle analyse à la fin.
+   La limite totale reste de 100 tours.
+
+**Actualiser l'historique** met à jour la liste si une réponse vient d'être sauvegardée ou si des
+fichiers ont été ajoutés dans le dossier. Pour changer son emplacement, définissez la variable
+d'environnement `DEBATE_HISTORY_DIR` avant de lancer l'application. Copiez ce dossier pour conserver
+toutes les conversations sur un autre disque ; la sauvegarde automatique remplace la dernière version
+de chaque débat, sans conserver toutes ses anciennes versions.
+
+Dans **Exporter le débat**, **Télécharger la sauvegarde complète** produit un JSON contenant aussi
+les mémoires privées dynamiques. Pour le restaurer, utilisez **Importer un débat ou une sauvegarde JSON**,
+puis **Restaurer le fichier JSON** dans la barre latérale. L'import crée une conversation distincte
+et conserve l'original. Les exports JSON partagés et les anciens exports sont également importables,
+mais leurs mémoires privées dynamiques sont absentes : les notes initiales servent de point de départ
+et le consensus repart de zéro, avec un avertissement visible. Le Markdown est destiné à la lecture.
+
+Les fichiers JSON sont validés et limités à **10 Mo**. Une sauvegarde invalide est signalée dans la liste
+sans masquer les autres conversations. Une erreur d'écriture s'affiche avec un bouton de nouvelle
+tentative ; la discussion reste disponible en mémoire et peut être téléchargée. En cas d'arrêt brutal
+du serveur, une réponse encore en cours de génération n'est pas conservée. Les sauvegardes contiennent
+votre discussion et les notes privées : gardez-les pour votre usage personnel.
 
 ## Recherche web des agents
 
@@ -154,8 +195,9 @@ envoyé au modèle est réduit lorsqu'il devient trop long :
 
 La mémoire privée est une courte note initiale, propre à chaque agent, bornée à 2048 octets UTF-8.
 Lorsque l'arrêt structuré est actif, l'agent peut mettre à jour cette note. L'adversaire et le juge
-ne la reçoivent jamais. Les notes privées dynamiques ne figurent pas dans les exports ; les notes
-**initiales**, qui appartiennent à la configuration saisie, figurent dans le JSON.
+ne la reçoivent jamais. Les notes privées dynamiques ne figurent pas dans les exports à partager ;
+elles sont conservées dans la sauvegarde automatique et la sauvegarde complète. Les notes **initiales**,
+qui appartiennent à la configuration saisie, figurent aussi dans l'export JSON partagé.
 
 L'arrêt anticipé demande une réponse conforme à un schéma JSON : `response`, `continue_debate`
 (booléen strict) et `private_note`. Aucun mot dans le texte ne peut déclencher l'arrêt.
@@ -183,13 +225,14 @@ Le panneau **Exporter le débat** propose :
 
 - **Markdown** : texte lisible, intervenants, consignes, changements, métadonnées et rapport ;
 - **JSON** : version du schéma, sujet, dates UTC, configuration initiale et actuelle, messages
-  ordonnés (y compris vos avis), changements de consignes, juge et métadonnées de mémoire.
+  ordonnés (y compris vos avis), changements de consignes, juge et métadonnées de mémoire ;
+- **Sauvegarde complète JSON** : tous les éléments précédents et l'état privé nécessaire à une reprise fidèle.
 
 Les exports sont des téléchargements du navigateur, jamais des fichiers ajoutés automatiquement
 au dépôt. Ils peuvent contenir ce que vous avez saisi : choisissez ce que vous souhaitez partager.
-Les fichiers `.env`, les exports dans `exports/`, environnements virtuels, secrets Streamlit,
+Les fichiers `.env`, les exports dans `exports/`, l'historique dans `conversations/`, environnements virtuels, secrets Streamlit,
 poids de modèles et caches usuels sont ignorés par Git. `.env.example` documente une variable
-optionnelle `OLLAMA_URL` ; les fichiers `.env` ne sont pas lus automatiquement.
+optionnelle `OLLAMA_URL` et l'emplacement `DEBATE_HISTORY_DIR` ; les fichiers `.env` ne sont pas lus automatiquement.
 
 ## Performances et matériel
 
@@ -225,12 +268,14 @@ debate/
   judge.py              Analyse indépendante à la fin
   presets.py            Quatre configurations éditables
   export.py             Markdown et JSON
-tests/                  Tests du moteur, mémoire, client, interface et exports
+  storage.py            Sauvegardes JSON atomiques, validation et restauration
+conversations/          Historique local automatique (ignoré par Git)
+tests/                  Tests du moteur, mémoire, client, interface, exports et restauration
 scripts/smoke_ollama.py  Vérification réelle facultative avec un modèle installé
 ```
 
 Le cœur Python ne dépend pas de Streamlit et peut être utilisé ou testé séparément. Les sources
-et mémoires sont déjà séparées : un RAG, des documents propres aux agents ou une persistance
+et mémoires sont déjà séparées : un RAG ou des documents propres aux agents
 pourraient être ajoutés aux points de construction de contexte sans changer l'attribution des rôles.
 
 ## Exemples de débats
@@ -256,7 +301,8 @@ Dans l'environnement virtuel :
 
 Les tests ordinaires simulent Ollama et ne requièrent ni GPU ni réseau. Ils vérifient notamment
 l'attribution des rôles, l'isolation des mémoires, les avis humains, les consignes, le consensus,
-les erreurs, les limites de contexte, les exports, les pauses, la recherche web et le parcours Streamlit.
+les erreurs, les limites de contexte, les exports, les pauses, la recherche web, les sauvegardes atomiques,
+la reprise après redémarrage et le parcours Streamlit.
 
 Pour un test réel volontaire, avec le modèle déjà installé (trois générations courtes) :
 
@@ -284,14 +330,15 @@ le compteur de tokens d'une intervention reste celui de sa réponse finale.
 - Pas de streaming dans cette première version ; les interventions validées apparaissent une à une.
 - Une pause ou un arrêt prend effet après l'intervention en cours, qui peut inclure la planification
   web, plusieurs recherches et la réponse. Délai maximal par génération Ollama : 600 s.
-- Les sessions sont en RAM. Un redémarrage ou une nouvelle session navigateur perd l'état : exportez
-  avant de fermer. Pas d'import ou de reprise depuis un JSON dans cette version.
+- Après redémarrage ou dans une nouvelle session navigateur, sélectionnez votre débat dans l'historique
+  et restaurez-le. Les sauvegardes conservent les interventions terminées, pas une génération en cours.
 - Les modèles peuvent halluciner, manquer une objection ou négliger une contrainte. Le juge ne
   constitue pas une preuve de vérité. Le plan de recherche web utilise du JSON structuré, même si
   l'arrêt anticipé est désactivé ; un modèle incompatible poursuit sans recherche et signale l'erreur.
 - Résumés susceptibles de perdre des détails et estimation de contexte volontairement prudente.
-- Le nombre de tours et les modèles restent fixes pendant un débat ; langue et contraintes sont modifiables.
-- Pistes futures : streaming validé, sauvegarde/reprise, sources distinctes, RAG et tokenizer adapté.
+- Les modèles restent fixes pendant un débat ; langue et contraintes sont modifiables. Un débat terminé
+  peut être rouvert avec des tours supplémentaires.
+- Pistes futures : streaming validé, sources distinctes, RAG et tokenizer adapté.
 
 API utilisées : [chat Ollama](https://docs.ollama.com/api/chat),
 [sorties structurées](https://docs.ollama.com/capabilities/structured-outputs),

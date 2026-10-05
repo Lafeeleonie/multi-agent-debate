@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import asdict
+from datetime import datetime
 
 import streamlit as st
 
@@ -11,6 +12,13 @@ from debate.models import AgentConfig, DebateConfig, JudgeConfig, WebSearchConfi
 from debate.ollama_client import OllamaClient, OllamaError
 from debate.presets import PRESET_NAMES, get_preset
 from debate.runner import DebateRunner
+from debate.storage import (
+    MAX_FILE_BYTES,
+    ConversationStore,
+    HistoryError,
+    checkpoint_json,
+    restore_json,
+)
 from debate.web_search import BACKENDS
 
 st.set_page_config(page_title="Agora locale · Débat IA", page_icon="💬", layout="wide")
@@ -36,6 +44,68 @@ def apply_preset() -> None:
     for key in asdict(preset.web):
         setattr(preset.web, key, st.session_state["cfg_web_" + key])
     seed_widgets(preset, replace=True)
+
+
+def install_restored(engine: DebateEngine, store: ConversationStore) -> None:
+    previous: DebateRunner | None = st.session_state.get("runner")
+    if previous:
+        previous.save()
+    runner = DebateRunner(engine, store)
+    runner.judge_attempted = True  # Restoring never generates anything automatically.
+    st.session_state.runner = runner
+    st.session_state.automatic = False
+    seed_widgets(engine.config, replace=True)
+
+
+def history_panel(store: ConversationStore) -> None:
+    runner: DebateRunner | None = st.session_state.get("runner")
+    locked = runner is not None and (runner.busy or runner.running)
+    with st.sidebar.expander("Historique et restauration", expanded=True):
+        entries = store.list_conversations()
+        for warning in store.warnings:
+            st.warning(warning)
+        if entries:
+            labels = {
+                item.conversation_id: f"{item.topic[:65]} · {item.message_count} messages · "
+                f"{'Terminé' if item.finished else 'En pause'} · "
+                f"{datetime.fromtimestamp(item.updated_ns / 1e9):%d/%m/%Y %H:%M}"
+                for item in entries
+            }
+            selected = st.selectbox(
+                "Conversations enregistrées",
+                list(labels),
+                format_func=labels.get,
+                key="saved_conversation",
+            )
+            if st.button("Restaurer la conversation", disabled=locked, width="stretch"):
+                try:
+                    install_restored(store.load(selected), store)
+                    st.rerun()
+                except HistoryError as exc:
+                    st.error(str(exc))
+        else:
+            st.caption("Vos débats seront sauvegardés automatiquement ici.")
+        st.button("Actualiser l'historique", width="stretch")
+        uploaded = st.file_uploader(
+            "Importer un débat ou une sauvegarde JSON",
+            type=["json"],
+            disabled=locked,
+            key="history_upload",
+        )
+        if st.button(
+            "Restaurer le fichier JSON", disabled=locked or uploaded is None, width="stretch"
+        ):
+            try:
+                if uploaded.size > MAX_FILE_BYTES:
+                    raise HistoryError("Le fichier dépasse la limite de 10 Mo.")
+                install_restored(restore_json(uploaded.getvalue(), new_identity=True), store)
+                st.rerun()
+            except HistoryError as exc:
+                st.error(str(exc))
+        st.caption(
+            "Sauvegardes locales automatiques, y compris les mémoires privées. "
+            "Une restauration revient toujours en pause."
+        )
 
 
 @st.cache_data(ttl=15, show_spinner=False)
@@ -314,6 +384,7 @@ def live_controls(runner: DebateRunner) -> None:
                     web_b=web_b,
                 )
                 runner.error = None
+                runner.save()
                 st.success("Consignes appliquées aux prochaines réponses et au juge.")
             except ValueError as exc:
                 st.error(str(exc))
@@ -356,7 +427,7 @@ def show_history(engine: DebateEngine) -> None:
 
 
 @st.fragment(run_every=0.5)
-def debate_panel(config: DebateConfig) -> None:
+def debate_panel(config: DebateConfig, store: ConversationStore) -> None:
     runner: DebateRunner | None = st.session_state.get("runner")
     if runner:
         runner.poll()
@@ -378,7 +449,7 @@ def debate_panel(config: DebateConfig) -> None:
             client.require_model(config.model, installed)
             if config.judge.enabled:
                 client.require_model(config.judge.model, installed)
-            runner = DebateRunner(DebateEngine(config))
+            runner = DebateRunner(DebateEngine(config), store)
             st.session_state.runner = runner
             runner.advance(automatic=automatic)
             st.rerun()
@@ -398,6 +469,8 @@ def debate_panel(config: DebateConfig) -> None:
     ):
         runner.stop()
     if buttons[4].button("Réinitialiser", disabled=runner is None or runner.busy, width="stretch"):
+        runner.pause()
+        runner.save()
         del st.session_state.runner
         st.rerun()
     if runner is None:
@@ -412,6 +485,10 @@ def debate_panel(config: DebateConfig) -> None:
     )
     if runner.error:
         st.error(runner.error)
+    if runner.storage_error:
+        st.error(runner.storage_error)
+        if st.button("Réessayer la sauvegarde", disabled=runner.busy):
+            runner.save()
     if runner.busy:
         name = (
             "Juge"
@@ -447,12 +524,31 @@ def debate_panel(config: DebateConfig) -> None:
         try:
             engine.add_human_message(human_text)
             runner.error = None
+            runner.save()
             st.rerun()
         except ValueError as exc:
             st.error(str(exc))
     if engine.finished and engine.config.judge.enabled:
         if st.button("Générer / refaire le rapport du juge", disabled=runner.busy):
             runner.judge()
+    if engine.finished:
+        with st.expander("Prolonger ce débat"):
+            available_rounds = 100 - (engine.agent_turns + 1) // 2
+            if available_rounds > 0:
+                additional = st.number_input(
+                    "Tours supplémentaires",
+                    1,
+                    available_rounds,
+                    value=min(5, available_rounds),
+                    key="additional_rounds",
+                )
+                if st.button("Rouvrir le débat en pause", disabled=runner.busy):
+                    engine.reopen(int(additional))
+                    runner.judge_attempted = False
+                    runner.save()
+                    st.rerun()
+            else:
+                st.caption("La limite de 100 tours est atteinte.")
     if engine.state.messages:
         with st.expander("Exporter le débat", expanded=engine.finished):
             col_md, col_json = st.columns(2)
@@ -475,8 +571,21 @@ def debate_panel(config: DebateConfig) -> None:
                 "Les exports contiennent votre discussion et sa configuration. "
                 "Ils restent sur votre machine jusqu'à ce que vous les partagiez."
             )
+            st.download_button(
+                "Télécharger la sauvegarde complète",
+                checkpoint_json(engine),
+                f"debate-{stamp}-backup.json",
+                "application/json",
+                width="stretch",
+            )
+            st.caption(
+                "La sauvegarde complète inclut les mémoires privées dynamiques "
+                "et permet une restauration fidèle. Gardez-la pour votre usage personnel."
+            )
 
 
 defaults = DebateConfig(ollama_url=os.environ.get("OLLAMA_URL", "http://localhost:11434"))
+history_store = ConversationStore()
+history_panel(history_store)
 seed_widgets(defaults)
-debate_panel(configuration())
+debate_panel(configuration(), history_store)

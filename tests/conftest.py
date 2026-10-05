@@ -32,3 +32,8 @@ def turn(response="Argument public", vote=True, note="Note privée"):
 @pytest.fixture
 def config():
     return DebateConfig()
+
+
+@pytest.fixture(autouse=True)
+def isolated_history(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEBATE_HISTORY_DIR", str(tmp_path / "conversations"))

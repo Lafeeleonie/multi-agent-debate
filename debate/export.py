@@ -10,6 +10,7 @@ def export_json(engine: DebateEngine) -> str:
     return json.dumps(
         {
             "schema_version": 1,
+            "conversation_id": engine.state.conversation_id,
             "topic": engine.config.topic,
             "created_at": engine.state.created_at,
             "finished_at": engine.state.finished_at,

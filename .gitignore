@@ -17,6 +17,7 @@ models/
 *.safetensors
 *.bin
 exports/
+conversations/
 *.log
 build/
 dist/

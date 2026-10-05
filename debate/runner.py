@@ -8,10 +8,11 @@ from time import monotonic
 from debate.engine import DebateEngine
 from debate.judge import run_judge
 from debate.ollama_client import OllamaClient
+from debate.storage import ConversationStore, HistoryError
 
 
 class DebateRunner:
-    def __init__(self, engine: DebateEngine):
+    def __init__(self, engine: DebateEngine, store: ConversationStore | None = None):
         self.engine = engine
         self.future: Future[DebateEngine] | None = None
         self.job: str | None = None
@@ -20,6 +21,21 @@ class DebateRunner:
         self.error: str | None = None
         self.next_at = 0.0
         self.judge_attempted = False
+        self.store = store
+        self.storage_error: str | None = None
+        self.save()
+
+    def _save_engine(self, engine: DebateEngine) -> None:
+        if self.store is not None:
+            try:
+                self.store.save(engine)
+                self.storage_error = None
+            except HistoryError as exc:
+                self.storage_error = str(exc)
+
+    def save(self) -> None:
+        if not self.busy:
+            self._save_engine(self.engine)
 
     @property
     def busy(self) -> bool:
@@ -41,6 +57,7 @@ class DebateRunner:
             self.stop_requested = True
         else:
             self.engine.finish()
+            self.save()
 
     def judge(self) -> None:
         if not self.busy and self.engine.finished:
@@ -63,6 +80,10 @@ class DebateRunner:
                 else:
                     client.require_model(working.config.judge.model)
                     run_judge(working, client)
+                if self.stop_requested:
+                    working.finish()
+                # Persist even if the browser has closed and no UI polling occurs.
+                self._save_engine(working)
                 future.set_result(working)
             except Exception as exc:
                 future.set_exception(exc)
@@ -80,7 +101,9 @@ class DebateRunner:
             self.job = None
             self.next_at = monotonic() + self.engine.config.delay_seconds
             if self.stop_requested:
-                self.engine.finish()
+                if not self.engine.finished:
+                    self.engine.finish()
+                    self.save()
                 self.stop_requested = False
         if self.busy:
             return

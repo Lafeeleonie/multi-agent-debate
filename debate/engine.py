@@ -49,9 +49,25 @@ class DebateEngine:
             self.state.stop_reason = reason
             self.state.finished_at = utc_now()
 
+    def reopen(self, additional_rounds: int) -> None:
+        if not self.finished:
+            raise ValueError("Ce débat est déjà ouvert.")
+        completed_rounds = (self.agent_turns + 1) // 2
+        if (
+            type(additional_rounds) is not int
+            or not 1 <= additional_rounds <= 100 - completed_rounds
+        ):
+            raise ValueError("Le débat ne peut pas dépasser 100 tours au total.")
+        self.config.max_rounds = completed_rounds + additional_rounds
+        self.state.stop_reason = None
+        self.state.finished_at = None
+        self.state.judge_result = None
+        self.state.judge_context_reduced = False
+        self._reset_consensus()
+
     def add_human_message(self, text: str) -> None:
         if self.finished:
-            raise ValueError("Ce débat est terminé. Réinitialisez pour en lancer un autre.")
+            raise ValueError("Ce débat est terminé. Rouvrez-le en pause pour continuer.")
         if not text.strip():
             raise ValueError("Votre intervention ne peut pas être vide.")
         if len(text.encode("utf-8")) > self.config.context_tokens // 3:

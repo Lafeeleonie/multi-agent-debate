@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import uuid4
 
 DEFAULT_MODEL = "huihui_ai/qwen3.5-abliterated:35b"
 DEFAULT_RULES = """Répondre directement aux arguments de l'adversaire et de l'utilisateur.
@@ -180,3 +181,4 @@ class DebateState:
     judge_context_reduced: bool = False
     control_events: list[ControlEvent] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    conversation_id: str = field(default_factory=lambda: str(uuid4()))
