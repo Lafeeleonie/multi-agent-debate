@@ -72,7 +72,7 @@ def test_human_participation_and_live_constraints_in_ui(monkeypatch):
     )
     button(app, "Appliquer les consignes").click().run()
     assert not app.exception
-    button(app, "Réponse suivante / reprendre").click().run()
+    button(app, "Reprendre").click().run()
     wait_for_reply(app)
     prompt = client.calls[-1]["messages"][0]["content"]
     assert "English" in prompt and "At most 100 words" in prompt
@@ -120,7 +120,7 @@ def test_new_session_restores_history_in_pause_and_resumes_next_agent(monkeypatc
     assert restored.engine.next_speaker == "b"
     assert len(app.chat_message) == 2
 
-    button(app, "Réponse suivante / reprendre").click().run()
+    button(app, "Reprendre").click().run()
     wait_for_reply(app)
     assert app.session_state.runner.engine.state.messages[-1].speaker_id == "b"
     prompt = client.calls[0]["messages"][0]["content"]
@@ -174,7 +174,7 @@ def test_finished_history_restores_without_automatic_judge_and_can_be_extended(m
     assert not app.exception
     assert app.session_state.runner.engine.finished
     assert not client.calls and not app.session_state.runner.busy
-    assert button(app, "Réponse suivante / reprendre").disabled
+    assert button(app, "Reprendre").disabled
 
     app.number_input(key="additional_rounds").set_value(2)
     button(app, "Rouvrir le débat en pause").click().run()
@@ -182,7 +182,7 @@ def test_finished_history_restores_without_automatic_judge_and_can_be_extended(m
     assert not app.session_state.runner.engine.finished
     assert app.session_state.runner.engine.config.max_rounds == 3
     assert not client.calls
-    button(app, "Réponse suivante / reprendre").click().run()
+    button(app, "Reprendre").click().run()
     wait_for_reply(app)
     assert app.session_state.runner.engine.agent_turns == 3
     assert app.session_state.runner.engine.state.messages[-1].speaker_id == "a"

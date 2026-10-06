@@ -440,7 +440,7 @@ def debate_panel(config: DebateConfig, store: ConversationStore) -> None:
         "En mode pas à pas, chaque clic produit une réponse. En automatique, "
         "mettez en pause pour intervenir ou changer les consignes."
     )
-    buttons = st.columns(5)
+    buttons = st.columns(2)
     if buttons[0].button("Lancer", disabled=runner is not None, type="primary", width="stretch"):
         try:
             config.validate()
@@ -455,20 +455,7 @@ def debate_panel(config: DebateConfig, store: ConversationStore) -> None:
             st.rerun()
         except (ValueError, OllamaError) as exc:
             st.error(str(exc))
-    can_advance = runner is not None and not runner.busy and not runner.engine.finished
-    if buttons[1].button("Réponse suivante / reprendre", disabled=not can_advance, width="stretch"):
-        runner.advance(automatic=automatic)
-    if buttons[2].button(
-        "Pause",
-        disabled=runner is None or (not runner.busy and not runner.running),
-        width="stretch",
-    ):
-        runner.pause()
-    if buttons[3].button(
-        "Arrêter", disabled=runner is None or runner.engine.finished, width="stretch"
-    ):
-        runner.stop()
-    if buttons[4].button("Réinitialiser", disabled=runner is None or runner.busy, width="stretch"):
+    if buttons[1].button("Réinitialiser", disabled=runner is None or runner.busy, width="stretch"):
         runner.pause()
         runner.save()
         del st.session_state.runner
@@ -516,18 +503,6 @@ def debate_panel(config: DebateConfig, store: ConversationStore) -> None:
     for warning in engine.state.warnings:
         st.warning(warning)
     show_history(engine)
-    human_text = st.chat_input(
-        "Votre avis ou votre question aux agents…",
-        disabled=runner.busy or runner.running or engine.finished,
-    )
-    if human_text:
-        try:
-            engine.add_human_message(human_text)
-            runner.error = None
-            runner.save()
-            st.rerun()
-        except ValueError as exc:
-            st.error(str(exc))
     if engine.finished and engine.config.judge.enabled:
         if st.button("Générer / refaire le rapport du juge", disabled=runner.busy):
             runner.judge()
@@ -584,8 +559,59 @@ def debate_panel(config: DebateConfig, store: ConversationStore) -> None:
             )
 
 
+@st.fragment(run_every=0.5)
+def debate_footer() -> None:
+    runner: DebateRunner | None = st.session_state.get("runner")
+    if runner is None:
+        return
+    engine = runner.engine
+    with st.container(horizontal=True, gap="small"):
+        if st.button(
+            "Reprendre",
+            icon=":material/play_arrow:",
+            disabled=runner.busy or engine.finished,
+            help="Une réponse en mode pas à pas ; reprise de l'enchaînement en mode automatique.",
+            width="stretch",
+        ):
+            runner.advance(automatic=st.session_state.automatic)
+            st.rerun()
+        if st.button(
+            "Pause",
+            icon=":material/pause:",
+            disabled=not runner.busy and not runner.running,
+            help="Conserve l'intervention en cours et empêche la suivante.",
+            width="stretch",
+        ):
+            runner.pause()
+            st.rerun()
+        if st.button(
+            "Arrêter",
+            icon=":material/stop:",
+            disabled=engine.finished,
+            help="Termine le débat après l'intervention en cours.",
+            width="stretch",
+        ):
+            runner.stop()
+            st.rerun()
+    human_text = st.chat_input(
+        "Votre avis ou votre question aux agents…",
+        disabled=runner.busy or runner.running or engine.finished,
+    )
+    if human_text:
+        try:
+            engine.add_human_message(human_text)
+            runner.error = None
+            runner.save()
+            st.rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+
 defaults = DebateConfig(ollama_url=os.environ.get("OLLAMA_URL", "http://localhost:11434"))
 history_store = ConversationStore()
 history_panel(history_store)
 seed_widgets(defaults)
 debate_panel(configuration(), history_store)
+# Enter the bottom container before the fragment so its widgets stay in its own scope.
+with st.bottom:
+    debate_footer()

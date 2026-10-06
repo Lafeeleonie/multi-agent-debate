@@ -74,13 +74,17 @@ La page principale affiche A en bleu, B en orange et vos messages avec une icôn
 avec le numéro de tour, la durée de génération et le compteur de tokens fourni par Ollama.
 Le rapport du juge et les exports apparaissent à la suite.
 
+Pendant un débat, une barre compacte reste fixée en bas de l'écran avec **Reprendre**, **Pause**
+et **Arrêter**, juste au-dessus de votre champ de saisie. Les commandes restent accessibles pendant
+le défilement, sur ordinateur et sur mobile ; leur disponibilité suit l'état du débat.
+
 1. Choisissez un preset, cliquez sur « Remplir les champs », puis adaptez chaque champ.
 2. Définissez le sujet, la langue et les contraintes. Exemple : « Français », « 150 mots maximum,
    distinguer faits et hypothèses », avec « un exemple concret » pour A et « une objection » pour B.
 3. Cliquez sur **Lancer**. Par défaut, une seule réponse est générée.
 4. Écrivez votre avis dans le champ de discussion pendant une pause. Il est intégré à l'historique
    public ; les deux agents le voient lors de leurs prochaines interventions.
-5. Cliquez sur **Réponse suivante / reprendre**. Votre avis ne consomme pas le tour d'un agent.
+5. Cliquez sur **Reprendre**. Votre avis ne consomme pas le tour d'un agent.
 6. Pour enchaîner les réponses, activez le mode automatique avant de lancer ou reprendre.
    **Pause** conserve la réponse en cours et empêche l'appel suivant. La saisie humaine est disponible
    lorsque l'appel est terminé et que le débat est en pause.
@@ -112,7 +116,7 @@ Dans la barre latérale, ouvrez **Historique et restauration** :
 1. Choisissez une conversation par son sujet, son nombre de messages, son état et sa date de modification.
 2. Cliquez sur **Restaurer la conversation**. Tous les messages, sources, consignes, mémoires privées,
    résumé, votes de consensus et éventuel rapport du juge sont restaurés.
-3. Le débat revient **en pause**, sans génération automatique. Cliquez sur **Réponse suivante / reprendre**
+3. Le débat revient **en pause**, sans génération automatique. Cliquez sur **Reprendre**
    pour continuer avec le bon agent. La restauration est disponible lorsque la génération et le mode
    automatique sont en pause.
 4. Pour continuer un débat terminé, ouvrez **Prolonger ce débat**, choisissez les tours supplémentaires,
